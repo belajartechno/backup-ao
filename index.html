@@ -9,26 +9,34 @@
     body { padding: 30px; }
     table th, table td { text-align: center; }
     canvas { max-width: 100%; }
+    .notification {
+      position: fixed; top: 10px; right: 10px; z-index: 9999;
+    }
   </style>
 </head>
 <body>
   <h2 class="mb-4">Dashboard Laporan Kinerja Harian AO</h2>
+
+  <!-- Notifikasi -->
+  <div id="notification" class="notification"></div>
 
   <!-- Form Input -->
   <form id="formLaporan" class="row g-3 mb-4">
     <div class="col-md-3">
       <select id="karyawan" class="form-select" required>
         <option value="">Pilih Karyawan</option>
+        <!-- Daftar karyawan tetap sama -->
         <option>YASINTA NOVIANA, S.E</option>
         <option>HERNI INDRAYANI, S.P</option>
         <option>VIKA DAMAYANTI, S.Pd</option>
         <option>ZAHRA LINTANG CAHYANI</option>
         <option>FERA AGUSTIN, S.Pd</option>
         <option>KHOIRUDIN LATIF SURYANTO</option>
-        <option>OLIVIA NANDA, S.E</option>
+        <option>OLVIA NANDA, S.E</option>
         <option>NABILA RENATA</option>
         <option>M. ZAINUL ANWAR</option>
         <option>LISNAWATI, S.E</option>
+        <option>MAHMUD RIFA'I</option>
         <option>ANUARRUDIN, S.E</option>
         <option>ANDRE HERLI PRATAMA</option>
         <option>IRMA PUSPITA SARI</option>
@@ -108,16 +116,16 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
-
   <script>
     const form = document.getElementById("formLaporan");
     const body = document.getElementById("dataBody");
     const rekapBody = document.getElementById("rekapBody");
     const chartCanvas = document.getElementById("kunjunganChart");
+    const notification = document.getElementById("notification");
     let chartInstance;
     let laporanData = [];
 
-    // Load data offline (localStorage)
+    // === LOAD DATA ===
     if (localStorage.getItem("laporanData")) {
       laporanData = JSON.parse(localStorage.getItem("laporanData"));
       renderTable();
@@ -125,42 +133,80 @@
       renderChart();
     }
 
-    // Ganti dengan URL Web App Google Apps Script Anda (lihat instruksi di bawah)
-    const GOOGLE_SHEETS_WEBAPP_URL = "PASTE_URL_WEB_APP_HERE";
+    // 🔴 GANTI DENGAN URL WEB APP ANDA DARI GOOGLE APPS SCRIPT
+    const GOOGLE_SHEETS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbysberrGhkDYRldI1ZEefMbLWiJbKzb--mxgTw0yaCGLqTPIdC__GdTOABUZKSp-O83xg/exec"; // ← GANTI INI!
 
-    function sendDataToGoogleSheets(item) {
-      fetch(GOOGLE_SHEETS_WEBAPP_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(item),
-      })
-        .then((res) => res.json())
-        .then((data) => console.log("Google Sheets response:", data))
-        .catch((e) => console.error("Google Sheets error:", e));
+    // === FUNGSI NOTIFIKASI ===
+    function showNotification(message, isError = false) {
+      notification.className = `notification alert ${isError ? 'alert-danger' : 'alert-success'} fade show`;
+      notification.textContent = message;
+      setTimeout(() => notification.classList.remove('show'), 3000);
     }
 
+    // === KIRIM KE GOOGLE SHEETS ===
+    async function sendDataToGoogleSheets(item) {
+      try {
+        const response = await fetch(GOOGLE_SHEETS_WEBAPP_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item),
+        });
+        const data = await response.json();
+        console.log("Google Sheets response:", data);
+        if (!response.ok) throw new Error(data.error || "Gagal kirim ke Google Sheets");
+        showNotification("Data berhasil dikirim ke Google Sheets & Drive!");
+      } catch (e) {
+        console.error("Google Sheets error:", e);
+        showNotification("Gagal kirim ke Google Sheets. Data tetap tersimpan lokal.", true);
+      }
+    }
+
+    // === CEK DUPLIKASI ===
+    function isDuplicate(newItem) {
+      const today = new Date().toLocaleDateString("id-ID");
+      return laporanData.some(item =>
+        item.karyawan === newItem.karyawan &&
+        item.tanggal === today &&
+        item.hari === newItem.hari
+      );
+    }
+
+    // === SUBMIT FORM ===
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      const item = {
-        tanggal: new Date().toLocaleDateString("id-ID"),
-        hari: document.getElementById("hari").value,
-        karyawan: document.getElementById("karyawan").value,
-        kantor: document.getElementById("kantor").value,
-        kunjungan: parseInt(document.getElementById("kunjungan").value),
+
+      const tanggal = new Date().toLocaleDateString("id-ID");
+      const hari = document.getElementById("hari").value;
+      const karyawan = document.getElementById("karyawan").value;
+      const kantor = document.getElementById("kantor").value;
+      const kunjungan = parseInt(document.getElementById("kunjungan").value);
+
+      const newItem = {
+        tanggal,
+        hari,
+        karyawan,
+        kantor,
+        kunjungan,
+        timestamp: new Date().toISOString() // tambahkan timestamp
       };
 
-      laporanData.push(item);
+      if (isDuplicate(newItem)) {
+        showNotification("Data untuk karyawan ini hari ini sudah ada!", true);
+        return;
+      }
+
+      laporanData.push(newItem);
       localStorage.setItem("laporanData", JSON.stringify(laporanData));
 
-      sendDataToGoogleSheets(item); // Kirim data ke Google Sheets
+      sendDataToGoogleSheets(newItem); // Kirim ke Sheets (dan nanti ke Drive via Apps Script)
 
       renderTable();
       renderRekap();
       renderChart();
-
       form.reset();
     });
 
+    // === RENDER TABEL ===
     function renderTable() {
       body.innerHTML = "";
       laporanData.forEach((item) => {
@@ -176,6 +222,7 @@
       });
     }
 
+    // === RENDER REKAP ===
     function renderRekap() {
       rekapBody.innerHTML = "";
       const rekap = {};
@@ -189,6 +236,7 @@
       });
     }
 
+    // === RENDER GRAFIK ===
     function renderChart() {
       const rekap = {};
       laporanData.forEach((i) => {
@@ -201,56 +249,76 @@
         type: "bar",
         data: {
           labels,
-          datasets: [
-            {
-              label: "Total Kunjungan",
-              data,
-              backgroundColor: "rgba(54, 162, 235, 0.6)",
-            },
-          ],
+          datasets: [{
+            label: "Total Kunjungan",
+            data,
+            backgroundColor: "rgba(54, 162, 235, 0.6)",
+          }],
         },
         options: {
           responsive: true,
           plugins: {
             legend: { display: false },
-            title: {
-              display: true,
-              text: "Total Kunjungan per Karyawan",
-            },
+            title: { display: true, text: "Total Kunjungan per Karyawan" },
           },
           scales: { y: { beginAtZero: true } },
         },
       });
     }
 
+    // === EXPORT EXCEL ===
     function exportExcel() {
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.table_to_sheet(document.getElementById("tabelLaporan")),
-        "Harian"
-      );
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.table_to_sheet(document.getElementById("rekapTable")),
-        "Rekap"
-      );
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.table_to_sheet(document.getElementById("tabelLaporan")), "Harian");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.table_to_sheet(document.getElementById("rekapTable")), "Rekap");
       XLSX.writeFile(wb, "Laporan_Kinerja_Harian_AO.xlsx");
     }
 
+    // === EXPORT PDF (SELURUH LAPORAN) ===
     async function exportPDF() {
       const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF();
-      await html2canvas(document.getElementById("tabelLaporan")).then(
-        (canvas) => {
-          const img = canvas.toDataURL("image/png");
-          const prop = pdf.getImageProperties(img);
-          const pdfW = pdf.internal.pageSize.getWidth();
-          const pdfH = (prop.height * pdfW) / prop.width;
-          pdf.addImage(img, "PNG", 10, 10, pdfW - 20, pdfH);
-          pdf.save("Laporan_Kinerja_Harian_AO.pdf");
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      // Ambil seluruh konten laporan
+      const content = document.createElement("div");
+      content.appendChild(document.getElementById("tabelLaporan").cloneNode(true));
+      content.appendChild(document.getElementById("rekapTable").cloneNode(true));
+      content.appendChild(document.getElementById("kunjunganChart").cloneNode(true));
+
+      // Sembunyikan sementara elemen non-laporan
+      const originalBody = document.body.innerHTML;
+      const tempDiv = document.createElement("div");
+      tempDiv.style.padding = "20px";
+      tempDiv.appendChild(content);
+      document.body.innerHTML = "";
+      document.body.appendChild(tempDiv);
+
+      try {
+        const canvas = await html2canvas(document.body);
+        const imgData = canvas.toDataURL("image/png");
+        const imgProps = pdf.getImageProperties(imgData);
+        const pdfHeight = (imgProps.height * pageWidth) / imgProps.width;
+
+        if (pdfHeight > pageHeight) {
+          // Skala agar muat
+          const scale = pageHeight / pdfHeight;
+          pdf.addImage(imgData, 'PNG', 0, 0, pageWidth, pdfHeight * scale);
+        } else {
+          pdf.addImage(imgData, 'PNG', 0, 0, pageWidth, pdfHeight);
         }
-      );
+
+        pdf.save("Laporan_Kinerja_Harian_AO.pdf");
+      } catch (e) {
+        console.error("PDF export error:", e);
+        showNotification("Gagal ekspor PDF", true);
+      } finally {
+        // Kembalikan DOM
+        document.body.innerHTML = originalBody;
+        // Re-render chart (karena canvas hilang)
+        renderChart();
+      }
     }
   </script>
 </body>
